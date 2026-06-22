@@ -1,0 +1,33 @@
+{
+  "name": "image-gen-mcp",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "MCP server that generates images via ChatGPT/DALL-E by driving your real, logged-in Edge/Chrome browser over CDP — no API key, no token.",
+  "main": "mcp-server.mjs",
+  "bin": {
+    "image-gen-mcp": "mcp-server.mjs"
+  },
+  "scripts": {
+    "test-connection": "node setup-session.mjs",
+    "start": "node mcp-server.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "image-generation",
+    "dall-e",
+    "chatgpt",
+    "playwright",
+    "claude-code",
+    "ai-agent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nothariharan/image-gen.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright-core": "^1.44.0"
+  }
+}
