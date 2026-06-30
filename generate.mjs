@@ -45,7 +45,7 @@ function isChromeImage(url) {
   return /avatar|profile|favicon|sprite|emoji|sentinel/i.test(url);
 }
 
-export async function generateImage(prompt, outputPath, { transparent = false } = {}) {
+export async function generateImage(prompt, outputPath, { transparent = false, referenceImages = [] } = {}) {
   const finalPrompt = transparent
     ? `${prompt}, isolated subject, transparent background, no background, no shadow`
     : prompt;
@@ -64,9 +64,24 @@ export async function generateImage(prompt, outputPath, { transparent = false } 
     );
   }
 
-  const contexts = browser.contexts();
-  const context = contexts.length ? contexts[0] : await browser.newContext();
-  const page = await context.newPage();
+  // Reuse an existing open ChatGPT tab if one is available; otherwise open a new one.
+  let page = null;
+  let needsNavigation = false;
+  for (const ctx of browser.contexts()) {
+    for (const p of ctx.pages()) {
+      if (p.url().includes("chatgpt.com")) {
+        page = p;
+        break;
+      }
+    }
+    if (page) break;
+  }
+  if (!page) {
+    const contexts = browser.contexts();
+    const context = contexts.length ? contexts[0] : await browser.newContext();
+    page = await context.newPage();
+    needsNavigation = true;
+  }
 
   /** @type {{url: string, buf: Buffer, at: number}[]} */
   const images = [];          // network-captured image bytes (fallback)
@@ -108,9 +123,27 @@ export async function generateImage(prompt, outputPath, { transparent = false } 
   page.on("response", onResponse);
 
   try {
-    console.error("[image-gen] Opening ChatGPT...");
-    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    if (needsNavigation) {
+      console.error("[image-gen] Opening ChatGPT...");
+      await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    } else {
+      console.error(`[image-gen] Reusing existing ChatGPT tab (${page.url()})...`);
+    }
     await page.waitForSelector("#prompt-textarea", { state: "visible", timeout: 20_000 });
+
+    // Snapshot every generated-image src already in the DOM before we send the prompt.
+    // The detector will ignore these and only surface images that appear after this point.
+    const existingImageSrcs = new Set(await page.evaluate(() =>
+      [...document.querySelectorAll('img[alt^="Generated image"]')]
+        .map(el => el.currentSrc || el.src)
+        .filter(Boolean)
+    ));
+    console.error(`[image-gen] Found ${existingImageSrcs.size} pre-existing image(s) in thread — will ignore them.`);
+
+    // Attach reference images BEFORE typing the prompt so ChatGPT sees them as context.
+    if (referenceImages.length > 0) {
+      await uploadReferenceImages(page, referenceImages);
+    }
 
     promptSentAt = Date.now();
     listening = true;
@@ -123,8 +156,9 @@ export async function generateImage(prompt, outputPath, { transparent = false } 
     console.error("[image-gen] Waiting for generated image (up to 3 min)...");
     const deadline = Date.now() + HARD_TIMEOUT_MS;
 
-    // PRIMARY: wait for img[alt^="Generated image"] whose src has stabilized.
-    const stableSrc = await waitForStableGeneratedImage(page, deadline, () => {
+    // PRIMARY: wait for img[alt^="Generated image"] whose src has stabilized
+    // AND whose src was not present before we sent the prompt.
+    const stableSrc = await waitForStableGeneratedImage(page, deadline, existingImageSrcs, () => {
       if (refusal && Date.now() - promptSentAt > REFUSAL_MIN_WAIT_MS) {
         throw new Error(`ChatGPT refused: ${refusal.trim()}`);
       }
@@ -176,29 +210,89 @@ export async function generateImage(prompt, outputPath, { transparent = false } 
     );
   } finally {
     page.off("response", onResponse);
-    await page.close(); // close just this tab — Edge stays open
+    // Tab stays open — the user controls which chat thread to reuse vs. start fresh.
   }
 }
 
 /**
- * Polls for the newest <img alt="Generated image…"> and returns its src once
- * that src has remained unchanged for SRC_STABLE_MS (i.e. the final, not the
- * preview). Calls onTick each poll so callers can bail on refusal.
+ * Attaches local image files to the ChatGPT composer as visual references.
+ * Uses the hidden file input that backs ChatGPT's attachment button.
+ * Missing files are skipped with a warning; errors are non-fatal.
  */
-async function waitForStableGeneratedImage(page, deadline, onTick) {
+async function uploadReferenceImages(page, imagePaths) {
+  const validPaths = imagePaths
+    .map(p => path.resolve(p))
+    .filter(p => {
+      if (!fs.existsSync(p)) {
+        console.error(`[image-gen] Skipping missing reference image: ${p}`);
+        return false;
+      }
+      return true;
+    });
+
+  if (!validPaths.length) return;
+
+  console.error(`[image-gen] Attaching ${validPaths.length} reference image(s)...`);
+
+  // Baseline: count blob-URL previews already on screen so we can detect new ones.
+  const beforeCount = await page.evaluate(() =>
+    document.querySelectorAll('img[src^="blob:"]').length
+  );
+
+  try {
+    await page.setInputFiles('input[type="file"]', validPaths);
+  } catch (err) {
+    console.error(`[image-gen] Warning: could not attach reference images — ${err.message}. Proceeding without them.`);
+    return;
+  }
+
+  // Wait for attachment thumbnails to appear (blob: previews rendered by ChatGPT's JS).
+  const deadline = Date.now() + 10_000;
+  let confirmed = false;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(400);
+    const afterCount = await page.evaluate(() =>
+      document.querySelectorAll('img[src^="blob:"]').length
+    );
+    if (afterCount > beforeCount) {
+      confirmed = true;
+      break;
+    }
+  }
+
+  if (confirmed) {
+    console.error("[image-gen] Reference images attached and previewing in composer.");
+  } else {
+    console.error("[image-gen] Warning: attachment previews did not appear — proceeding anyway.");
+  }
+}
+
+/**
+ * Polls for a NEW <img alt="Generated image…"> (one whose src was not in
+ * existingImageSrcs before the prompt was sent) and returns its src once it
+ * has remained unchanged for SRC_STABLE_MS (defeats the preview→final swap).
+ * Calls onTick each poll so callers can bail on refusal.
+ */
+async function waitForStableGeneratedImage(page, deadline, existingImageSrcs, onTick) {
   let lastSrc = null;
   let stableSince = 0;
+  const existingArr = [...existingImageSrcs]; // serialisable for page.evaluate
 
   while (Date.now() < deadline) {
     await page.waitForTimeout(700);
     if (onTick) onTick();
 
-    const src = await page.evaluate(() => {
+    const src = await page.evaluate((existingSrcs) => {
       const imgs = [...document.querySelectorAll('img[alt^="Generated image"]')];
-      if (!imgs.length) return null;
-      const el = imgs[imgs.length - 1];
+      // Only consider images that weren't present before the prompt was sent.
+      const newImgs = imgs.filter(el => {
+        const s = el.currentSrc || el.src;
+        return s && !existingSrcs.includes(s);
+      });
+      if (!newImgs.length) return null;
+      const el = newImgs[newImgs.length - 1];
       return el.currentSrc || el.src || null;
-    });
+    }, existingArr);
 
     if (!src) continue;
 

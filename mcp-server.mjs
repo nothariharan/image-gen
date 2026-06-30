@@ -58,6 +58,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
               "needs no background (used on colored/dark website sections). " +
               "Automatically appends no-background instructions to the prompt.",
           },
+          reference_images: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional list of absolute local file paths to attach as visual " +
+              "references. ChatGPT will use them as context when generating — " +
+              "useful for style matching, variations, or img2img-style requests. " +
+              "Example: [\"/path/to/sketch.png\", \"/path/to/palette.jpg\"]",
+          },
         },
         required: ["prompt"],
       },
@@ -75,6 +84,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     filename = `generated_${Date.now()}`,
     output_dir,
     transparent_background = false,
+    reference_images = [],
   } = req.params.arguments;
 
   const outputPath = path.join(output_dir || process.cwd(), `${filename}.png`);
@@ -82,6 +92,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   try {
     const saved = await generateImage(prompt, outputPath, {
       transparent: transparent_background,
+      referenceImages: reference_images,
     });
     return {
       content: [{ type: "text", text: `Image saved to: ${saved}` }],
