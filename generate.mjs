@@ -19,7 +19,9 @@
  */
 
 import { chromium } from "playwright-core";
+import { execFileSync, spawn } from "child_process";
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -33,6 +35,12 @@ const MIN_IMAGE_BYTES = 80 * 1024;   // 80 KB — excludes avatars/icons
 const HARD_TIMEOUT_MS = 180_000;     // 3 min absolute ceiling
 const SRC_STABLE_MS = 3_000;         // src must be unchanged this long = final
 const REFUSAL_MIN_WAIT_MS = 12_000;  // don't honor a refusal read too eagerly
+const CDP_LAUNCH_TIMEOUT_MS = 30_000;
+const LOGIN_WAIT_MS = 120_000;       // wait for user to finish ChatGPT login once
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 function isConversationUrl(url) {
   return (
@@ -45,6 +53,248 @@ function isChromeImage(url) {
   return /avatar|profile|favicon|sprite|emoji|sentinel/i.test(url);
 }
 
+/** True if Edge/Chrome is already listening on the CDP port. */
+function cdpReady(timeoutMs = 800) {
+  return new Promise((resolve) => {
+    const req = http.get(`${CDP_URL}/json/version`, { timeout: timeoutMs }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function findEdgeExecutable() {
+  const candidates = [
+    path.join(process.env["ProgramFiles(x86)"] || "", "Microsoft", "Edge", "Application", "msedge.exe"),
+    path.join(process.env.ProgramFiles || "", "Microsoft", "Edge", "Application", "msedge.exe"),
+  ];
+  return candidates.find((p) => p && fs.existsSync(p)) || null;
+}
+
+/**
+ * If nothing is listening on the CDP port, fully restart Edge with
+ * --remote-debugging-port so Playwright can attach. Uses the normal
+ * Edge profile so an existing ChatGPT login is reused.
+ */
+async function ensureEdgeWithCdp() {
+  if (await cdpReady()) return;
+
+  if (process.platform !== "win32") {
+    throw new Error(
+      `Cannot connect to a browser on port ${CDP_PORT}. ` +
+      `Start Chrome/Edge yourself with --remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
+    );
+  }
+
+  const edge = findEdgeExecutable();
+  if (!edge) {
+    throw new Error("Microsoft Edge not found. Install Edge, then retry.");
+  }
+
+  console.error(`[image-gen] No browser on :${CDP_PORT} — relaunching Edge with remote debugging...`);
+
+  try {
+    execFileSync("taskkill", ["/F", "/IM", "msedge.exe", "/T"], { stdio: "ignore" });
+  } catch {
+    /* already closed */
+  }
+  await sleep(3000);
+
+  const userData = path.join(process.env.LOCALAPPDATA, "Microsoft", "Edge", "User Data");
+  spawn(
+    edge,
+    [
+      `--remote-debugging-port=${CDP_PORT}`,
+      "--remote-allow-origins=*",
+      `--user-data-dir=${userData}`,
+      "--profile-directory=Default",
+      "--restore-last-session",
+      "https://chatgpt.com",
+    ],
+    { detached: true, stdio: "ignore" },
+  ).unref();
+
+  const deadline = Date.now() + CDP_LAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await cdpReady(1000)) {
+      console.error("[image-gen] Edge CDP is ready.");
+      await sleep(2000); // let chatgpt.com start loading
+      return;
+    }
+    await sleep(400);
+  }
+
+  throw new Error(
+    `Launched Edge but port ${CDP_PORT} never opened. ` +
+    `Fully quit Edge and retry, or run ${path.join(__dirname, "launch-edge.bat")}`,
+  );
+}
+
+async function hasChatGptSession(page) {
+  const cookies = await page.context().cookies("https://chatgpt.com");
+  return cookies.some((c) => /session-token/i.test(c.name));
+}
+
+async function promptReady(page) {
+  try {
+    return (await page.locator("#prompt-textarea").count()) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ChatGPT often sticks on the "Welcome back / Choose an account" picker.
+ * Click the saved account automatically (no password entry).
+ */
+async function tryClickAccountPicker(page) {
+  const preferredEmail =
+    process.env.IMAGE_GEN_CHATGPT_EMAIL || "nothariharan@gmail.com";
+
+  const modalVisible = await page
+    .getByText(/Choose an account to continue|Welcome back/i)
+    .first()
+    .isVisible()
+    .catch(() => false);
+
+  if (!modalVisible) return false;
+
+  console.error(`[image-gen] Account picker detected — clicking ${preferredEmail}...`);
+
+  // Prefer the known account email.
+  const byEmail = page.getByText(preferredEmail, { exact: false }).first();
+  if (await byEmail.isVisible().catch(() => false)) {
+    await byEmail.click({ timeout: 8_000 }).catch(async () => {
+      // Email text may be nested; click its nearest clickable ancestor via JS.
+      await page.evaluate((email) => {
+        const el = [...document.querySelectorAll("button, [role='button'], a, div")]
+          .find((n) => (n.textContent || "").includes(email));
+        if (el) el.click();
+      }, preferredEmail);
+    });
+    await sleep(2500);
+    return true;
+  }
+
+  // Fallback: first visible email-looking account row.
+  const anyEmail = page.locator("text=/[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}/").first();
+  if (await anyEmail.isVisible().catch(() => false)) {
+    console.error("[image-gen] Preferred email not found — clicking first saved account...");
+    await anyEmail.click({ timeout: 8_000 }).catch(() => {});
+    await sleep(2500);
+    return true;
+  }
+
+  // Last resort: click a row that looks like the account card ("awe" name, etc.).
+  const clicked = await page.evaluate(() => {
+    const root = [...document.querySelectorAll("button, [role='button'], div")]
+      .find((n) => /@[\\w.-]+\\.[A-Za-z]{2,}/.test(n.textContent || "") && (n.textContent || "").length < 200);
+    if (!root) return false;
+    root.click();
+    return true;
+  });
+  if (clicked) {
+    await sleep(2500);
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Ensure ChatGPT is logged in. Auto-clicks the account picker when present.
+ * Only waits on the user for real password/OAuth flows that need interaction.
+ */
+async function ensureChatGptLoggedIn(page) {
+  try {
+    await page.bringToFront();
+  } catch {
+    /* ignore */
+  }
+
+  if (!page.url().includes("chatgpt.com")) {
+    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  }
+
+  // Fast path: already logged in with a usable composer.
+  if ((await hasChatGptSession(page)) && (await promptReady(page))) {
+    // Still clear a blocking account modal if somehow present.
+    await tryClickAccountPicker(page);
+    if (await promptReady(page)) return;
+  }
+
+  console.error("[image-gen] Ensuring ChatGPT login (auto account-picker click enabled)...");
+
+  // Dismiss picker immediately if already on home with Welcome back.
+  await tryClickAccountPicker(page);
+
+  if (!(await hasChatGptSession(page)) && !(await promptReady(page))) {
+    const needsLogin = await page.evaluate(() => {
+      const text = document.body?.innerText || "";
+      return /log in|sign up|welcome back|choose an account/i.test(text);
+    }).catch(() => true);
+
+    if (needsLogin || page.url().includes("/auth/")) {
+      // Stay on chatgpt.com first — picker often appears there; auth/login is backup.
+      if (!page.url().includes("chatgpt.com") || page.url().includes("/auth/login")) {
+        await page.goto("https://chatgpt.com", {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        }).catch(() => {});
+      }
+      await tryClickAccountPicker(page);
+
+      // If still no session and no picker, open auth login (may still show same picker).
+      if (!(await hasChatGptSession(page)) && !(await promptReady(page))) {
+        const stillPicker = await page
+          .getByText(/Choose an account to continue|Welcome back/i)
+          .first()
+          .isVisible()
+          .catch(() => false);
+        if (!stillPicker) {
+          await page.goto("https://chatgpt.com/auth/login", {
+            waitUntil: "domcontentloaded",
+            timeout: 30_000,
+          }).catch(() => {});
+          await tryClickAccountPicker(page);
+        }
+      }
+    }
+  }
+
+  const deadline = Date.now() + LOGIN_WAIT_MS;
+  while (Date.now() < deadline) {
+    await tryClickAccountPicker(page);
+
+    if (await hasChatGptSession(page)) {
+      if (!page.url().includes("chatgpt.com") || page.url().includes("/auth/")) {
+        await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+      }
+      await tryClickAccountPicker(page);
+      const ready = await page
+        .waitForSelector("#prompt-textarea", { state: "visible", timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (ready) {
+        console.error("[image-gen] ChatGPT login ready.");
+        return;
+      }
+    }
+
+    await sleep(1500);
+  }
+
+  throw new Error(
+    "ChatGPT login did not complete. If a password/OAuth page appeared, finish it once in the Edge window; " +
+    "the 'Welcome back' account picker is clicked automatically. Then retry.",
+  );
+}
+
 export async function generateImage(prompt, outputPath, { transparent = false, referenceImages = [] } = {}) {
   const finalPrompt = transparent
     ? `${prompt}, isolated subject, transparent background, no background, no shadow`
@@ -53,14 +303,15 @@ export async function generateImage(prompt, outputPath, { transparent = false, r
   const resolvedOutput = path.resolve(outputPath);
   fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
 
+  await ensureEdgeWithCdp();
+
   let browser;
   try {
     browser = await chromium.connectOverCDP(CDP_URL);
   } catch {
     throw new Error(
-      `Cannot connect to Edge on port ${CDP_PORT}.\n` +
-      `Run the launcher: ${path.join(__dirname, "launch-edge.bat")}\n` +
-      `(or start Edge/Chrome yourself with --remote-debugging-port=${CDP_PORT})`
+      `Cannot connect to Edge on port ${CDP_PORT} even after auto-launch.\n` +
+      `Run: ${path.join(__dirname, "launch-edge.bat")}`,
     );
   }
 
@@ -82,6 +333,8 @@ export async function generateImage(prompt, outputPath, { transparent = false, r
     page = await context.newPage();
     needsNavigation = true;
   }
+
+  await ensureChatGptLoggedIn(page);
 
   /** @type {{url: string, buf: Buffer, at: number}[]} */
   const images = [];          // network-captured image bytes (fallback)

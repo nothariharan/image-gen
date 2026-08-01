@@ -46,16 +46,16 @@ cd image-gen
 npm install
 ```
 
-**Start Edge with remote debugging:**
+**Edge / login (usually automatic):**
 
-The easiest way on Windows is to double-click `launch-edge.bat`. It closes any running Edge instance and relaunches it with the debug port enabled, restoring your existing tabs.
+On Windows, `generate_image` will auto-launch Edge with `--remote-debugging-port=9222` if nothing is listening, then open chatgpt.com. If ChatGPT shows the **Welcome back / Choose an account** picker, it clicks the saved account automatically (default email `nothariharan@gmail.com`, override with `IMAGE_GEN_CHATGPT_EMAIL`). You only need to intervene for a real password/OAuth step.
 
-If you want it permanently, edit your Edge shortcut target:
+Manual fallback: double-click `launch-edge.bat`, or start Edge yourself with:
 ```
-"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222
+"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --remote-allow-origins=*
 ```
 
-Fully close Edge first — if Edge is already running without the flag, opening a new window just joins the existing process and the debug port never opens.
+Fully close Edge first if it was started without the debug flag — otherwise a new window joins the existing process and the port never opens.
 
 **Verify it works:**
 ```bash

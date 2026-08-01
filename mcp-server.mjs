@@ -11,13 +11,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import path from "path";
-import { fileURLToPath } from "url";
 import { generateImage } from "./generate.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const server = new Server(
-  { name: "playwright-image-gen", version: "2.0.0" },
+  { name: "playwright-image-gen", version: "2.1.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -27,9 +24,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "generate_image",
       description:
         "Generate an image using ChatGPT DALL-E via a real Edge browser session. " +
-        "Opens Edge, goes to chatgpt.com, types the prompt, waits for generation, " +
-        "downloads the PNG, and saves it. Use for any image, illustration, icon, " +
-        "banner, hero image, or visual asset needed in a project.",
+        "Automatically launches Edge with remote debugging (port 9222) if needed, " +
+        "opens chatgpt.com, auto-clicks the Welcome-back account picker when present, " +
+        "waits only for real password/OAuth if required, types the prompt, " +
+        "waits for generation, downloads the PNG, and saves it. Use for any image, " +
+        "illustration, icon, banner, hero image, or visual asset needed in a project.",
       inputSchema: {
         type: "object",
         properties: {
@@ -98,19 +97,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       content: [{ type: "text", text: `Image saved to: ${saved}` }],
     };
   } catch (err) {
-    const isConnError = err.message.includes("connect to Edge");
-    const launcher = path.join(__dirname, "launch-edge.bat");
     return {
-      content: [
-        {
-          type: "text",
-          text:
-            `Error: ${err.message}` +
-            (isConnError
-              ? `\n\nFix: make sure Edge is running with remote debugging — run ${launcher}`
-              : ""),
-        },
-      ],
+      content: [{ type: "text", text: `Error: ${err.message}` }],
       isError: true,
     };
   }

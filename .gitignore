@@ -2,4 +2,6 @@ node_modules/
 *.log
 test-output.png
 generated_*.png
+mcp-test-*.png
+edge-debug-profile/
 .DS_Store
