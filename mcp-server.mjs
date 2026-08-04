@@ -14,7 +14,7 @@ import path from "path";
 import { generateImage } from "./generate.mjs";
 
 const server = new Server(
-  { name: "playwright-image-gen", version: "2.1.0" },
+  { name: "playwright-image-gen", version: "2.2.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -24,11 +24,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "generate_image",
       description:
         "Generate an image using ChatGPT DALL-E via a real Edge browser session. " +
-        "Automatically launches Edge with remote debugging (port 9222) if needed, " +
-        "opens chatgpt.com, auto-clicks the Welcome-back account picker when present, " +
-        "waits only for real password/OAuth if required, types the prompt, " +
-        "waits for generation, downloads the PNG, and saves it. Use for any image, " +
-        "illustration, icon, banner, hero image, or visual asset needed in a project.",
+        "Uses a dedicated Edge auth profile (attach-first on port 9222, never kills your daily browser). " +
+        "Auto-clicks Welcome-back account picker, restores chatgpt-storage.json cookies if needed, " +
+        "types the prompt, waits for generation, downloads the PNG, and saves it. " +
+        "If login is missing, tell the user to run: node login-once.mjs in the image-gen folder. " +
+        "Use for any image, illustration, icon, banner, hero image, or visual asset.",
       inputSchema: {
         type: "object",
         properties: {

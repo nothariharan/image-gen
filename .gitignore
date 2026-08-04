@@ -4,4 +4,6 @@ test-output.png
 generated_*.png
 mcp-test-*.png
 edge-debug-profile/
+edge-auth-profile/
+chatgpt-storage.json
 .DS_Store

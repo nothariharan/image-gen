@@ -1,6 +1,6 @@
 {
   "name": "image-gen-mcp",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "type": "module",
   "description": "MCP server that generates images via ChatGPT/DALL-E by driving your real, logged-in Edge/Chrome browser over CDP — no API key, no token.",
   "main": "mcp-server.mjs",
@@ -8,6 +8,7 @@
     "image-gen-mcp": "mcp-server.mjs"
   },
   "scripts": {
+    "login": "node login-once.mjs",
     "test-connection": "node setup-session.mjs",
     "start": "node mcp-server.mjs"
   },

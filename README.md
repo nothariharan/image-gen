@@ -30,9 +30,9 @@ Why not just call the openai api directly? A few reasons: no key needed, it uses
 ## Requirements
 
 - Node 18+
-- Microsoft Edge or Chrome, running with `--remote-debugging-port=9222`
-- A chatgpt account, logged in in that browser
-- Windows for the `launch-edge.bat` helper (mac/linux works fine, just launch the browser yourself)
+- Microsoft Edge (Windows helper included; Chrome works the same with a dedicated profile)
+- A ChatGPT account
+- One-time login into the dedicated auth profile (`node login-once.mjs`)
 
 ---
 
@@ -46,20 +46,32 @@ cd image-gen
 npm install
 ```
 
-**Edge / login (usually automatic):**
+**One-time login (do this once):**
 
-On Windows, `generate_image` will auto-launch Edge with `--remote-debugging-port=9222` if nothing is listening, then open chatgpt.com. If ChatGPT shows the **Welcome back / Choose an account** picker, it clicks the saved account automatically (default email `nothariharan@gmail.com`, override with `IMAGE_GEN_CHATGPT_EMAIL`). You only need to intervene for a real password/OAuth step.
-
-Manual fallback: double-click `launch-edge.bat`, or start Edge yourself with:
-```
-"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --remote-allow-origins=*
+```bash
+npm run login
+# or: node login-once.mjs
 ```
 
-Fully close Edge first if it was started without the debug flag — otherwise a new window joins the existing process and the port never opens.
+This opens a **dedicated** Edge window (`edge-auth-profile/`) on port `9222`. It does **not** touch your daily Edge. Log into ChatGPT fully in that window. When the chat box appears, the script saves `chatgpt-storage.json` and exits.
+
+After that:
+- `generate_image` **attaches** if 9222 is already open (never kills browsers)
+- If 9222 is down, it relaunches only the auth profile
+- Welcome-back account picker is clicked automatically
+- Cookies are restored from `chatgpt-storage.json` if needed
+
+Do not delete `edge-auth-profile/` or `chatgpt-storage.json`. If ChatGPT fully expires the session months later, run `npm run login` again.
+
+Optional env vars:
+- `IMAGE_GEN_CDP_PORT` (default `9222`)
+- `IMAGE_GEN_PROFILE_DIR` (default `./edge-auth-profile`)
+- `IMAGE_GEN_STORAGE_STATE` (default `./chatgpt-storage.json`)
+- `IMAGE_GEN_CHATGPT_EMAIL` (account-picker preference)
 
 **Verify it works:**
 ```bash
-node setup-session.mjs
+npm run test-connection
 # → Connected! The browser has N open context(s).
 ```
 

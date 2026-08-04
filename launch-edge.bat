@@ -1,38 +1,38 @@
 @echo off
-:: Launch Edge with CDP port 9222 using your normal profile (ChatGPT login).
-:: Fully closes Edge first — required so the debug port actually binds.
+:: Launch the DEDICATED image-gen Edge auth profile with CDP port 9222.
+:: Attach-first: if 9222 is already open, do nothing.
+:: Does NOT kill your daily Edge — uses a separate --user-data-dir.
 
-curl -s http://127.0.0.1:9222/json/version > nul 2>&1
+set PORT=9222
+set PROFILE=%~dp0edge-auth-profile
+
+curl -s http://127.0.0.1:%PORT%/json/version > nul 2>&1
 if %errorlevel%==0 (
-    echo Edge is already running with debug port 9222. Ready!
+    echo Auth browser already running on port %PORT%. Ready!
     goto end
 )
-
-echo Closing any running Edge so the debug port can bind...
-taskkill /F /IM msedge.exe /T > nul 2>&1
-timeout /t 3 /nobreak > nul
 
 set EDGE="%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
 if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
     set EDGE="%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
 )
 
-set USERDATA=%LOCALAPPDATA%\Microsoft\Edge\User Data
+if not exist "%PROFILE%" mkdir "%PROFILE%"
 
-echo Relaunching Edge with --remote-debugging-port=9222 ...
-start "" %EDGE% --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%USERDATA%" --profile-directory=Default --restore-last-session https://chatgpt.com
+echo Launching dedicated auth-profile Edge on port %PORT%...
+echo Profile: %PROFILE%
+start "" %EDGE% --remote-debugging-port=%PORT% --remote-allow-origins=* --user-data-dir="%PROFILE%" --no-first-run --no-default-browser-check https://chatgpt.com
 
-echo.
-echo Waiting for port 9222...
+echo Waiting for port %PORT%...
 timeout /t 4 /nobreak > nul
 
-curl -s http://127.0.0.1:9222/json/version > nul 2>&1
+curl -s http://127.0.0.1:%PORT%/json/version > nul 2>&1
 if %errorlevel%==0 (
-    echo SUCCESS - Port 9222 is open.
-    echo Open chatgpt.com in that Edge window and make sure you are logged in.
+    echo SUCCESS - Port %PORT% is open.
+    echo If this is your first time, run:  node login-once.mjs
 ) else (
-    echo Port not detected yet - Edge may still be loading. Retry in a few seconds:
-    echo   node setup-session.mjs
+    echo Port not detected yet - Edge may still be loading.
+    echo Retry: node setup-session.mjs
 )
 
 :end

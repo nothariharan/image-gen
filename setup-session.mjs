@@ -1,31 +1,44 @@
 /**
- * setup-session.mjs — verifies the browser is reachable via CDP.
- * Run this once to confirm everything is wired up before using the MCP.
+ * setup-session.mjs — verifies the auth-profile browser is reachable via CDP.
  *
  * Usage: node setup-session.mjs
  */
 
 import { chromium } from "playwright-core";
+import {
+  AUTH_PROFILE_DIR,
+  STORAGE_STATE_PATH,
+  CDP_PORT,
+  CDP_URL,
+  cdpReady,
+  ensureEdgeWithCdp,
+} from "./generate.mjs";
+import fs from "fs";
 
-const CDP_PORT = process.env.IMAGE_GEN_CDP_PORT || "9222";
-const CDP_URL = `http://localhost:${CDP_PORT}`;
+console.log(`Auth profile: ${AUTH_PROFILE_DIR}`);
+console.log(`Storage file: ${STORAGE_STATE_PATH} (${fs.existsSync(STORAGE_STATE_PATH) ? "present" : "missing — run login-once.mjs"})`);
+console.log(`Testing CDP on port ${CDP_PORT}...\n`);
 
-console.log(`Testing connection to the browser on port ${CDP_PORT}...\n`);
+if (!(await cdpReady())) {
+  console.log("No browser on CDP — launching dedicated auth profile...");
+  try {
+    await ensureEdgeWithCdp();
+  } catch (err) {
+    console.error(`FAILED — ${err.message}\n`);
+    process.exit(1);
+  }
+}
 
 let browser;
 try {
   browser = await chromium.connectOverCDP(CDP_URL);
 } catch {
-  console.error(`FAILED — no browser is listening on --remote-debugging-port=${CDP_PORT}.\n`);
-  console.error("Fix options:\n");
-  console.error("  Quick:     close Edge, then double-click launch-edge.bat in this folder");
-  console.error("  Permanent: add  --remote-debugging-port=" + CDP_PORT + "  to your Edge");
-  console.error("             shortcut's Target, then relaunch Edge.\n");
+  console.error(`FAILED — could not connect to ${CDP_URL}\n`);
   process.exit(1);
 }
 
 const contexts = browser.contexts();
 console.log(`Connected! The browser has ${contexts.length} open context(s).`);
-console.log("Make sure you are logged in to chatgpt.com in that browser.");
+console.log("If ChatGPT asks you to log in, run: node login-once.mjs");
 console.log("The image-gen MCP is ready to use.\n");
 process.exit(0);
