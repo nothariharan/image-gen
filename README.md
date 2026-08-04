@@ -1,44 +1,46 @@
 <div align="center">
   <img src="assets/logo.png" width="140" alt="image-gen logo" />
   <h1>image-gen</h1>
-  <p>an mcp server that gives your ai agent a paintbrush — no api key required</p>
+  <p><strong>MCP image generation for AI coding agents — no OpenAI API key</strong></p>
+  <p>Drives your own logged-in ChatGPT session in a dedicated browser profile,<br/>downloads the PNG, and drops it into your project.</p>
 </div>
 
 ---
 
-It drives your own already-logged-in browser to chatgpt.com, types the prompt, waits for dall-e to finish, and downloads the exact png to disk. That's it. Your agent gets image generation for free because it's borrowing the chatgpt session you already have open.
+## Why this exists
 
-The reason this exists: every other image generation integration wants an openai api key and burns through credits. This one doesn't. If you're logged into chatgpt in your browser, your agent can generate images — hero banners, icons, illustrations, whatever — and wire them directly into the project it's building.
+Most agent image tools need an OpenAI API key and burn credits. **image-gen** borrows the ChatGPT plan you already pay for (Free / Plus / Pro), runs generation in a real browser, and returns a local file path your agent can embed immediately.
+
+Built for **Cursor**, **Claude Code**, **Claude Desktop**, and any MCP client.
 
 ---
 
-## How It Works
+## Features
 
-Playwright connects to your real running browser over the chrome devtools protocol (port 9222). It finds your existing chatgpt tab or opens a new one, types the prompt, and waits for `img[alt^="Generated image"]` to appear and stabilize. That selector is semantic and has held up across several chatgpt frontend rewrites. Once the image src stops changing for 3 seconds (defeats the preview→final resolution swap), it fetches the signed url from inside the page — the signature in the url makes it self-authorizing, no bearer token needed.
-
-**Fallback chain:**
-1. Wait for `img[alt^="Generated image"]` src to stabilize → fetch it from inside the page
-2. Largest `image/*` network response captured during generation (≥ 80kb, already auth'd by your session)
-3. Newest large `<img>` on the page
-
-It also parses the `/backend-api/conversation` stream just enough to catch refusals so it fails fast instead of hanging for 3 minutes.
-
-Why not just call the openai api directly? A few reasons: no key needed, it uses your existing chatgpt plan (including plus/pro quality), and driving a real browser sidesteps bot detection entirely. The tradeoff is that it's slower and depends on your browser staying open.
+- One-time login into a **dedicated Edge auth profile** (does not touch your daily browser)
+- **Attach-first** CDP — reconnects if the browser is already open; never force-kills your normal Edge
+- Auto-clicks ChatGPT’s **Welcome back / Choose an account** picker
+- Session backup via `chatgpt-storage.json` (cookies restored if needed)
+- Reference-image uploads for variations / style matching
+- Transparent-background prompt helper for icons and UI marks
+- Thread-safe image detection (ignores older images already in the chat)
 
 ---
 
 ## Requirements
 
-- Node 18+
-- Microsoft Edge (Windows helper included; Chrome works the same with a dedicated profile)
-- A ChatGPT account
-- One-time login into the dedicated auth profile (`node login-once.mjs`)
+| Requirement | Notes |
+|---|---|
+| **Node.js 18+** | Required to run the MCP server |
+| **Microsoft Edge** | Default on Windows. Chrome works with the same flags + a dedicated profile |
+| **ChatGPT account** | Free works; Plus/Pro usually means better image quality / limits |
+| **MCP client** | Cursor, Claude Code, Claude Desktop, etc. |
 
 ---
 
-## Setup
+## Quick start (5 minutes)
 
-**Clone and install:**
+### 1. Install
 
 ```bash
 git clone https://github.com/nothariharan/image-gen.git
@@ -46,50 +48,177 @@ cd image-gen
 npm install
 ```
 
-**One-time login (do this once):**
+### 2. One-time ChatGPT login
 
 ```bash
 npm run login
-# or: node login-once.mjs
 ```
 
-This opens a **dedicated** Edge window (`edge-auth-profile/`) on port `9222`. It does **not** touch your daily Edge. Log into ChatGPT fully in that window. When the chat box appears, the script saves `chatgpt-storage.json` and exits.
+What happens:
 
-After that:
-- `generate_image` **attaches** if 9222 is already open (never kills browsers)
-- If 9222 is down, it relaunches only the auth profile
-- Welcome-back account picker is clicked automatically
-- Cookies are restored from `chatgpt-storage.json` if needed
+1. A **dedicated** Edge window opens (`edge-auth-profile/`) on port `9222`
+2. Your normal/daily Edge is left alone
+3. Log into ChatGPT fully in that window (Google / password / 2FA)
+4. When the chat composer appears, the script saves `chatgpt-storage.json` and exits
 
-Do not delete `edge-auth-profile/` or `chatgpt-storage.json`. If ChatGPT fully expires the session months later, run `npm run login` again.
+**Do not delete** these after login:
 
-Optional env vars:
-- `IMAGE_GEN_CDP_PORT` (default `9222`)
-- `IMAGE_GEN_PROFILE_DIR` (default `./edge-auth-profile`)
-- `IMAGE_GEN_STORAGE_STATE` (default `./chatgpt-storage.json`)
-- `IMAGE_GEN_CHATGPT_EMAIL` (account-picker preference)
+- `edge-auth-profile/` — browser profile with your session
+- `chatgpt-storage.json` — cookie backup (gitignored)
 
-**Verify it works:**
+### 3. Verify
+
 ```bash
 npm run test-connection
 # → Connected! The browser has N open context(s).
 ```
 
-**Register with your agent:**
+### 4. Register the MCP with your agent
 
-```bash
-# Claude Code (global, works in every project)
-claude mcp add -s user image-gen node /absolute/path/to/image-gen/mcp-server.mjs
-```
+Use the **absolute path** to `mcp-server.mjs` on your machine.
 
-For Claude Desktop, Cursor, or anything else that reads an mcp json config:
+#### Cursor
+
+Open `~/.cursor/mcp.json` (Windows: `%USERPROFILE%\.cursor\mcp.json`) and add:
 
 ```json
 {
   "mcpServers": {
     "image-gen": {
       "command": "node",
-      "args": ["/absolute/path/to/image-gen/mcp-server.mjs"]
+      "args": ["C:/Users/YOU/playwright-image-gen/mcp-server.mjs"]
+    }
+  }
+}
+```
+
+Reload Cursor (or toggle the MCP off/on). The tool appears as `generate_image` on server `image-gen` / `user-image-gen`.
+
+**Tip:** In chat, invoke explicitly with `/chatgpt-image-gen` or say “use the image-gen MCP” so the agent doesn’t use Cursor’s built-in image tool.
+
+#### Claude Code
+
+```bash
+claude mcp add -s user image-gen node /absolute/path/to/image-gen/mcp-server.mjs
+```
+
+#### Claude Desktop
+
+Edit your Claude Desktop MCP config and add the same `command` / `args` block as Cursor.
+
+---
+
+## Everyday use
+
+Once login is done, your agent calls:
+
+```text
+generate_image
+```
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `prompt` | string | yes | Subject, style, palette, mood, composition |
+| `filename` | string | no | Output name without extension (default `generated_<timestamp>`) |
+| `output_dir` | string | no | Save directory (prefer project `public/` or `assets/`) |
+| `transparent_background` | boolean | no | Appends no-background instructions (icons/logos) |
+| `reference_images` | string[] | no | Absolute local paths to attach as visual context |
+
+**Example calls**
+
+```jsonc
+{
+  "prompt": "rainy city street at night, neon reflections, cinematic, wide shot",
+  "filename": "hero",
+  "output_dir": "./public"
+}
+```
+
+```jsonc
+{
+  "prompt": "minimalist calendar icon, thin lines, dark blue",
+  "filename": "icon-calendar",
+  "output_dir": "./public/icons",
+  "transparent_background": true
+}
+```
+
+```jsonc
+{
+  "prompt": "same character but angrier, keep the art style",
+  "filename": "mascot-angry",
+  "output_dir": "./public",
+  "reference_images": ["C:/path/to/project/public/mascot.png"]
+}
+```
+
+Returns: absolute path of the saved PNG.
+
+---
+
+## How auth persistence works
+
+```text
+npm run login  →  edge-auth-profile + chatgpt-storage.json
+        ↓
+generate_image
+        ↓
+  Is port 9222 up? ──yes──► attach (no browser kill)
+        │
+        no
+        ↓
+  Launch ONLY edge-auth-profile on :9222
+        ↓
+  Restore cookies from chatgpt-storage.json if needed
+        ↓
+  Auto-click Welcome-back account picker if shown
+        ↓
+  Generate + download PNG + refresh storage file
+```
+
+### When might ChatGPT still ask you to log in again?
+
+OpenAI does **not** publish an exact cookie TTL. In practice, sessions often last **weeks to months** if the auth profile is left alone. Re-login is usually triggered by things like:
+
+| Event | What to do |
+|---|---|
+| You changed your ChatGPT / Google password | `npm run login` again |
+| You used “Log out of all devices” / revoked sessions | `npm run login` again |
+| Long inactivity + OpenAI security challenge | Complete challenge once, or `npm run login` |
+| You deleted `edge-auth-profile` or `chatgpt-storage.json` | `npm run login` again |
+| OpenAI forced a platform-wide re-auth | `npm run login` again |
+
+Day-to-day use of this MCP should **not** log you out by itself anymore (it no longer kills your daily browser or mixes profiles).
+
+---
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `IMAGE_GEN_CDP_PORT` | `9222` | Chrome DevTools Protocol port |
+| `IMAGE_GEN_PROFILE_DIR` | `./edge-auth-profile` | Dedicated browser profile directory |
+| `IMAGE_GEN_STORAGE_STATE` | `./chatgpt-storage.json` | Cookie / storage backup file |
+| `IMAGE_GEN_CHATGPT_EMAIL` | _(optional)_ | Prefer this email on the account picker |
+
+Example (Windows PowerShell):
+
+```powershell
+$env:IMAGE_GEN_CHATGPT_EMAIL = "you@example.com"
+node mcp-server.mjs
+```
+
+Or in Cursor `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "image-gen": {
+      "command": "node",
+      "args": ["C:/Users/YOU/playwright-image-gen/mcp-server.mjs"],
+      "env": {
+        "IMAGE_GEN_CHATGPT_EMAIL": "you@example.com"
+      }
     }
   }
 }
@@ -97,120 +226,67 @@ For Claude Desktop, Cursor, or anything else that reads an mcp json config:
 
 ---
 
-## The generate_image Tool
+## How generation works (technical)
 
-| Parameter | Type | Description |
-|---|---|---|
-| `prompt` | string (required) | What to generate. The more specific the better — subject, style, palette, mood, composition. |
-| `filename` | string | Output filename without extension. Defaults to `generated_<timestamp>`. |
-| `output_dir` | string | Where to save. Defaults to the agent's cwd. |
-| `transparent_background` | boolean | Appends "isolated subject, transparent background, no shadow" to the prompt. Use for icons, logos, ui assets. |
-| `reference_images` | string[] | Local file paths to attach as visual context before the prompt is sent. See below. |
+Playwright attaches over CDP, finds/opens a `chatgpt.com` tab, types the prompt, and waits for:
 
-Returns the absolute path of the saved file.
-
-```jsonc
-// Basic hero image
-{ "prompt": "rainy city street at night, neon reflections, cinematic, wide shot",
-  "filename": "hero", "output_dir": "./public" }
-
-// Transparent icon
-{ "prompt": "minimalist calendar icon, thin lines, dark blue",
-  "filename": "icon-calendar", "output_dir": "./public/icons",
-  "transparent_background": true }
-
-// Variation of something already generated
-{ "prompt": "same character but angrier, keep the art style",
-  "filename": "mascot-angry", "output_dir": "./public",
-  "reference_images": ["./public/mascot.png"] }
+```text
+img[alt^="Generated image"]
 ```
 
----
+Primary path waits until the `src` stops changing for ~3 seconds (preview → final swap), then fetches the signed Estuary URL from inside the page.
 
-## Tab Reuse and Thread Control
+**Fallback chain**
 
-The mcp doesn't open a new chatgpt tab on every call. On each invocation it scans your open browser tabs for the first one on `chatgpt.com` and reuses it, then leaves it open when done.
+1. Stable `img[alt^="Generated image"]` → in-page fetch  
+2. Largest `image/*` network response during generation (≥ 80 KB)  
+3. Newest large `<img>` in the DOM  
 
-**What this means in practice:**
-
-- Leave the tab open → all generations go into the same conversation thread. The model has memory of everything it generated earlier in that thread, which matters when you're iterating.
-- Close the chatgpt tab → the next call opens a fresh tab to `chatgpt.com`, starting a new conversation.
-- Want a specific thread → navigate to that conversation in Edge before calling the tool.
-
-**Collision detection:** When reusing a thread that already has images, the mcp snapshots the `src` of every `img[alt^="Generated image"]` in the dom before sending the prompt. The image detector then only looks at srcs that weren't in that snapshot. So no matter how long the conversation gets, it always picks up the new image and not a previous one.
+Conversation streams are parsed only to detect refusals early (3‑minute hard timeout otherwise).
 
 ---
 
-## Reference Images
+## Tab / thread behavior
 
-Pass local file paths in `reference_images` to attach them to the chatgpt composer before the prompt goes in — same as manually dragging a file into the chat. Useful for:
+- Reuses the first open `chatgpt.com` tab; leaves it open afterward  
+- Keep the tab open → generations stay in one thread (good for iteration)  
+- Close the tab → next call starts a fresh conversation  
+- Want a specific thread → open that URL in the auth-profile browser first  
 
-- **Variations** — "same composition, night version"
-- **Style transfer** — attach a palette or mood reference and ask to match it
-- **Iterative refinement** — generate → save → use as reference → refine → repeat
-- **Multi-reference** — attach a sketch, a color swatch, and a style example all at once
-
-```jsonc
-{
-  "prompt": "refine this, make the lighting warmer and add depth to the background",
-  "filename": "scene-v2",
-  "reference_images": ["./output/scene-v1.png"]
-}
-```
-
-If a file path doesn't exist, that file is skipped with a warning and generation continues. Errors in the upload step are non-fatal — the prompt still goes through, just without the attachment.
+Collision guard: snapshots existing generated-image `src`s before sending the prompt, then only accepts new ones.
 
 ---
 
-## Using It Automatically with Claude Code
+## Scripts
 
-Add this to `~/.claude/CLAUDE.md` so the agent reaches for images without being asked:
-
-```markdown
-## Image Generation
-When building or editing any website or app, if any visual would improve it —
-hero images, illustrations, icons, empty states — call generate_image and wire
-the result in. Don't ask first. Save to public/ or assets/. Use
-transparent_background: true for anything placed on a colored section. When
-iterating on an image, pass the previous version in reference_images.
-```
-
----
-
-## Drawbacks and Known Issues
-
-This approach has real tradeoffs worth knowing about:
-
-**It's slow.** ChatGPT dall-e generation typically takes 15–60 seconds per image. There's a 3-minute hard timeout. If you need fast generation for a tight loop, this isn't the right tool.
-
-**It depends on your browser staying open.** If Edge crashes, gets restarted without the debug flag, or you get logged out of chatgpt, the next call will fail. The error messages are specific enough to tell you what happened.
-
-**The chatgpt dom can change.** The `img[alt^="Generated image"]` selector has been stable across several frontend rewrites, but it's not a contract. If chatgpt ships a big ui overhaul, this might need an update. The fallback chain (network capture → dom scan) covers most cases if the primary selector breaks.
-
-**Rate limits apply.** ChatGPT has per-account generation limits, especially on free plans. Hitting a rate limit shows up as a timeout or refusal, not a clear error message. If generation stops working, check chatgpt manually.
-
-**Reference image uploads depend on the file input selector.** If chatgpt changes how its attachment button works, `page.setInputFiles('input[type="file"]', ...)` might stop finding the input. The upload step is non-fatal so generation still proceeds, but without the attachment.
-
-**One image at a time.** Calls are synchronous. There's no queue or concurrency.
+| Command | What it does |
+|---|---|
+| `npm run login` | One-time (or rare re-) login + save session |
+| `npm run test-connection` | Launch/attach auth profile and verify CDP |
+| `npm start` | Run the MCP server on stdio |
+| `launch-edge.bat` | Windows helper to start the auth profile on `:9222` |
 
 ---
 
 ## macOS / Linux
 
-No `.bat`, but the setup is identical. Launch with the debug port:
+There is no `.bat` helper, but the flow is the same: dedicated profile + remote debugging + `npm run login`.
 
 ```bash
-# macOS (Edge)
-"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" --remote-debugging-port=9222 &
-
-# macOS (Chrome)
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 &
-
-# Linux
-google-chrome --remote-debugging-port=9222 &
+# Example: Chrome with a dedicated profile
+google-chrome \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=* \
+  --user-data-dir="$PWD/edge-auth-profile" \
+  https://chatgpt.com
 ```
 
-Override the port: `IMAGE_GEN_CDP_PORT=9223 node mcp-server.mjs`
+Then in another terminal:
+
+```bash
+npm run login   # if you still need to complete/save login
+npm start
+```
 
 ---
 
@@ -218,12 +294,48 @@ Override the port: `IMAGE_GEN_CDP_PORT=9223 node mcp-server.mjs`
 
 | Symptom | Fix |
 |---|---|
-| `Cannot connect to Edge on port 9222` | Edge isn't running with the debug flag. Run `launch-edge.bat` or add it to your shortcut. Fully close Edge first. |
-| `ChatGPT refused` | Prompt hit a content policy. Rephrase it. |
-| Timed out after 3 minutes | Check you're still logged into chatgpt. Could also be a rate limit — open chatgpt manually and see if it generates there. |
-| MCP uses the wrong thread | It picks the first chatgpt.com tab it finds. Close the tabs you don't want it to use. |
-| Reference images not showing up | Paths must be resolvable from the mcp process. Check the console output for "skipping missing" warnings. |
-| Previous image returned instead of new one | This is guarded against by the pre-prompt dom snapshot. If it still happens, open an issue with the prompt and thread length. |
+| `Cannot connect to Edge on port 9222` | Run `npm run login` or `launch-edge.bat`. Confirm nothing else is broken on that port: open `http://127.0.0.1:9222/json/version` |
+| Asked to log in again | Run `npm run login`. Don’t delete `edge-auth-profile` / `chatgpt-storage.json` |
+| Stuck on **Welcome back** | MCP auto-clicks; set `IMAGE_GEN_CHATGPT_EMAIL` if the wrong account is listed |
+| `ChatGPT refused` | Content policy — rephrase the prompt |
+| Timed out after 3 minutes | Check rate limits / Plus status in ChatGPT manually |
+| Agent used built-in image tool instead | Say “use image-gen MCP / `generate_image`” or `/chatgpt-image-gen` in Cursor |
+| Reference images skipped | Paths must exist and be absolute from the MCP process |
+| Wrong chat thread | Close extra `chatgpt.com` tabs in the auth-profile window |
+
+---
+
+## Security & privacy
+
+- Session files are **local secrets**. They are gitignored. Never commit or share `chatgpt-storage.json` or `edge-auth-profile/`.
+- The MCP talks to ChatGPT through **your** browser session — treat the machine like it’s logged into ChatGPT.
+- This project is **not affiliated with OpenAI**. Automating ChatGPT may conflict with OpenAI’s terms depending on use; for production/commercial scale, prefer the official Images API.
+
+---
+
+## Limitations
+
+- **Slow** — typically 15–60s per image (3 min hard cap)  
+- **One image at a time** — synchronous, no queue  
+- **DOM can change** — selectors may need updates after big ChatGPT UI changes  
+- **Account rate limits** apply (especially Free)  
+- Not a drop-in replacement for high-volume API generation  
+
+---
+
+## Project layout
+
+```text
+image-gen/
+├── mcp-server.mjs       # MCP entry (stdio)
+├── generate.mjs         # CDP attach, login, generation, download
+├── login-once.mjs       # One-time auth setup
+├── setup-session.mjs    # Connection smoke test
+├── launch-edge.bat      # Windows auth-profile launcher
+├── edge-auth-profile/   # Created locally — gitignored
+├── chatgpt-storage.json # Created locally — gitignored
+└── assets/
+```
 
 ---
 

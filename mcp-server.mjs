@@ -14,7 +14,7 @@ import path from "path";
 import { generateImage } from "./generate.mjs";
 
 const server = new Server(
-  { name: "playwright-image-gen", version: "2.2.0" },
+  { name: "playwright-image-gen", version: "2.3.0" },
   { capabilities: { tools: {} } }
 );
 

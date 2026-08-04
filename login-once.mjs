@@ -11,11 +11,13 @@
  * After this succeeds once, generate_image should stay logged in.
  */
 
+import fs from "fs";
 import { chromium } from "playwright-core";
 import {
   AUTH_PROFILE_DIR,
   STORAGE_STATE_PATH,
   CDP_PORT,
+  cdpReady,
   ensureEdgeWithCdp,
   ensureChatGptLoggedIn,
   saveStorageState,
@@ -29,6 +31,15 @@ console.log("");
 console.log("A dedicated Edge window will open (your daily Edge is left alone).");
 console.log("Log into ChatGPT fully there (account picker / Google / password).");
 console.log("This script waits until the chat composer is ready, then saves the session.\n");
+
+if ((await cdpReady()) && !fs.existsSync(AUTH_PROFILE_DIR)) {
+  console.warn(
+    "WARNING: Port 9222 is already open, but edge-auth-profile/ does not exist yet.\n" +
+    "You may be attached to a different browser. For a clean setup:\n" +
+    "  1) Close any browser started with --remote-debugging-port=9222\n" +
+    "  2) Re-run: npm run login\n",
+  );
+}
 
 await ensureEdgeWithCdp();
 

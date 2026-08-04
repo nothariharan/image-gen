@@ -1,8 +1,8 @@
 {
   "name": "image-gen-mcp",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "module",
-  "description": "MCP server that generates images via ChatGPT/DALL-E by driving your real, logged-in Edge/Chrome browser over CDP — no API key, no token.",
+  "description": "MCP image generation for AI agents via your ChatGPT browser session — no OpenAI API key. Dedicated auth profile, attach-first CDP, session backup.",
   "main": "mcp-server.mjs",
   "bin": {
     "image-gen-mcp": "mcp-server.mjs"
