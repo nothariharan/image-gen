@@ -116,6 +116,14 @@ Once login is done, your agent calls:
 generate_image
 ```
 
+### Parallel calls are queued (important)
+
+ChatGPT is a **single shared browser tab**. If two `generate_image` jobs type at once, prompts interleave into garbage text.
+
+**v2.4+ serializes every job** with an in-process queue + cross-process `.generate.lock` file. Parallel MCP calls wait their turn instead of colliding. You may still call multiple times from the agent — they run one after another automatically.
+
+If a job crashes hard and leaves a stuck lock, delete `image-gen/.generate.lock` (or wait until it goes stale, ~6 minutes).
+
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prompt` | string | yes | Subject, style, palette, mood, composition |

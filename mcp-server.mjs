@@ -14,7 +14,7 @@ import path from "path";
 import { generateImage } from "./generate.mjs";
 
 const server = new Server(
-  { name: "playwright-image-gen", version: "2.3.0" },
+  { name: "playwright-image-gen", version: "2.4.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -25,6 +25,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description:
         "Generate an image using ChatGPT DALL-E via a real Edge browser session. " +
         "Uses a dedicated Edge auth profile (attach-first on port 9222, never kills your daily browser). " +
+        "Jobs are globally queued — parallel generate_image calls wait and run one-at-a-time " +
+        "so they cannot overwrite each other's ChatGPT prompts. " +
         "Auto-clicks Welcome-back account picker, restores chatgpt-storage.json cookies if needed, " +
         "types the prompt, waits for generation, downloads the PNG, and saves it. " +
         "If login is missing, tell the user to run: node login-once.mjs in the image-gen folder. " +

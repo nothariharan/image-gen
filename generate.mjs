@@ -24,6 +24,7 @@ import fs from "fs";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
+import { withGenerateQueue } from "./queue.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -343,7 +344,7 @@ export async function ensureChatGptLoggedIn(page, { waitForManual = true } = {})
   );
 }
 
-export async function generateImage(prompt, outputPath, { transparent = false, referenceImages = [] } = {}) {
+async function generateImageUnlocked(prompt, outputPath, { transparent = false, referenceImages = [] } = {}) {
   const finalPrompt = transparent
     ? `${prompt}, isolated subject, transparent background, no background, no shadow`
     : prompt;
@@ -451,7 +452,22 @@ export async function generateImage(prompt, outputPath, { transparent = false, r
 
     console.error("[image-gen] Sending prompt...");
     await page.click("#prompt-textarea");
-    await page.keyboard.type(finalPrompt, { delay: 12 });
+    // Clear composer first — leftover text from a cancelled/parallel job causes garbage.
+    await page.evaluate(() => {
+      const el = document.querySelector("#prompt-textarea");
+      if (!el) return;
+      el.focus();
+      if (el.isContentEditable) {
+        el.innerHTML = "";
+        el.textContent = "";
+        el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      } else if ("value" in el) {
+        el.value = "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    // Atomic insert (not per-keystroke) so a lock slip can't interleave characters.
+    await page.keyboard.insertText(finalPrompt);
     await page.keyboard.press("Enter");
 
     console.error("[image-gen] Waiting for generated image (up to 3 min)...");
@@ -513,6 +529,14 @@ export async function generateImage(prompt, outputPath, { transparent = false, r
     page.off("response", onResponse);
     // Tab stays open — the user controls which chat thread to reuse vs. start fresh.
   }
+}
+
+/**
+ * Public entry — always queued. Parallel MCP calls wait their turn so they
+ * never type into the same ChatGPT composer at once.
+ */
+export async function generateImage(prompt, outputPath, options = {}) {
+  return withGenerateQueue(() => generateImageUnlocked(prompt, outputPath, options));
 }
 
 /**
