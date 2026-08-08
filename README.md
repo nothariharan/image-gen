@@ -22,8 +22,10 @@ Built for **Cursor**, **Claude Code**, **Claude Desktop**, and any MCP client.
 - Auto-clicks ChatGPT’s **Welcome back / Choose an account** picker
 - Session backup via `chatgpt-storage.json` (cookies restored if needed)
 - Reference-image uploads for variations / style matching
+- Auto-dismisses ChatGPT’s **“image was already uploaded”** / duplicate-file modal
 - Transparent-background prompt helper for icons and UI marks
 - Thread-safe image detection (ignores older images already in the chat)
+- Parallel `generate_image` calls are **queued** (in-process + file lock)
 
 ---
 
@@ -309,6 +311,7 @@ npm start
 | Timed out after 3 minutes | Check rate limits / Plus status in ChatGPT manually |
 | Agent used built-in image tool instead | Say “use image-gen MCP / `generate_image`” or `/chatgpt-image-gen` in Cursor |
 | Reference images skipped | Paths must exist and be absolute from the MCP process |
+| Stuck on **image was already uploaded** | v2.4.1+ auto-dismisses `#modal-duplicate-file`; reload the MCP if you’re still on an older process |
 | Wrong chat thread | Close extra `chatgpt.com` tabs in the auth-profile window |
 
 ---
@@ -324,7 +327,8 @@ npm start
 ## Limitations
 
 - **Slow** — typically 15–60s per image (3 min hard cap)  
-- **One image at a time** — synchronous, no queue  
+- **One image at a time** — jobs are queued and run serially  
+
 - **DOM can change** — selectors may need updates after big ChatGPT UI changes  
 - **Account rate limits** apply (especially Free)  
 - Not a drop-in replacement for high-volume API generation  

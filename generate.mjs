@@ -432,6 +432,8 @@ async function generateImageUnlocked(prompt, outputPath, { transparent = false, 
       console.error(`[image-gen] Reusing existing ChatGPT tab (${page.url()})...`);
     }
     await page.waitForSelector("#prompt-textarea", { state: "visible", timeout: 20_000 });
+    // Unblock composer if a prior job left ChatGPT's duplicate-upload dialog open.
+    await dismissDuplicateUploadModal(page);
 
     // Snapshot every generated-image src already in the DOM before we send the prompt.
     // The detector will ignore these and only surface images that appear after this point.
@@ -539,23 +541,86 @@ export async function generateImage(prompt, outputPath, options = {}) {
   return withGenerateQueue(() => generateImageUnlocked(prompt, outputPath, options));
 }
 
+/** ChatGPT's "this file was already uploaded" / duplicate-file dialog. */
+const DUPLICATE_FILE_MODAL =
+  '#modal-duplicate-file, [data-testid="modal-duplicate-file"]';
+
+/**
+ * ChatGPT blocks the composer when the same file is attached twice in a thread
+ * ("image was already uploaded"). Clear that modal so generation can continue.
+ * Prefer labeled buttons / Escape; fall back to removing the overlay from the DOM.
+ */
+async function dismissDuplicateUploadModal(page) {
+  const modal = page.locator(DUPLICATE_FILE_MODAL).first();
+  const textHit = page
+    .getByText(/already (been )?uploaded|duplicate file|file already exists/i)
+    .first();
+
+  const visible =
+    (await modal.isVisible().catch(() => false)) ||
+    (await textHit.isVisible().catch(() => false));
+  if (!visible) return false;
+
+  console.error("[image-gen] Duplicate-upload modal detected — dismissing...");
+
+  const labeled = page
+    .locator(`${DUPLICATE_FILE_MODAL} button, [role="dialog"] button`)
+    .filter({ hasText: /cancel|close|dismiss|ok|got it|continue|use existing/i });
+
+  if ((await labeled.count()) > 0) {
+    await labeled.first().click({ force: true }).catch(() => {});
+  } else {
+    await page.keyboard.press("Escape").catch(() => {});
+  }
+  await page.waitForTimeout(350);
+
+  // Hard-remove leftover overlay so the composer isn't stuck behind a ghost dialog.
+  await page.evaluate((sel) => {
+    document.querySelectorAll(sel).forEach((el) => {
+      const root = el.closest("[data-state='open']") || el.parentElement || el;
+      root.remove();
+    });
+    document.querySelectorAll("[data-state='open'].fixed").forEach((el) => {
+      const t = el.textContent || "";
+      if (/already (been )?uploaded|duplicate|upload/i.test(t)) el.remove();
+    });
+  }, DUPLICATE_FILE_MODAL);
+
+  const still =
+    (await modal.isVisible().catch(() => false)) ||
+    (await textHit.isVisible().catch(() => false));
+  if (still) {
+    console.error("[image-gen] Warning: duplicate-upload modal may still be present.");
+    return false;
+  }
+  console.error("[image-gen] Duplicate-upload modal dismissed.");
+  return true;
+}
+
 /**
  * Attaches local image files to the ChatGPT composer as visual references.
  * Uses the hidden file input that backs ChatGPT's attachment button.
  * Missing files are skipped with a warning; errors are non-fatal.
  */
 async function uploadReferenceImages(page, imagePaths) {
-  const validPaths = imagePaths
-    .map(p => path.resolve(p))
-    .filter(p => {
-      if (!fs.existsSync(p)) {
-        console.error(`[image-gen] Skipping missing reference image: ${p}`);
-        return false;
-      }
-      return true;
-    });
+  // Dedupe so the same path isn't attached twice in one call (triggers ChatGPT's modal).
+  const seen = new Set();
+  const validPaths = [];
+  for (const raw of imagePaths) {
+    const p = path.resolve(raw);
+    if (seen.has(p)) continue;
+    seen.add(p);
+    if (!fs.existsSync(p)) {
+      console.error(`[image-gen] Skipping missing reference image: ${p}`);
+      continue;
+    }
+    validPaths.push(p);
+  }
 
   if (!validPaths.length) return;
+
+  // Clear a leftover modal from a prior failed attach before we try again.
+  await dismissDuplicateUploadModal(page);
 
   console.error(`[image-gen] Attaching ${validPaths.length} reference image(s)...`);
 
@@ -568,14 +633,20 @@ async function uploadReferenceImages(page, imagePaths) {
     await page.setInputFiles('input[type="file"]', validPaths);
   } catch (err) {
     console.error(`[image-gen] Warning: could not attach reference images — ${err.message}. Proceeding without them.`);
+    await dismissDuplicateUploadModal(page);
     return;
   }
 
-  // Wait for attachment thumbnails to appear (blob: previews rendered by ChatGPT's JS).
+  // Wait for attachment thumbnails OR the duplicate-file modal (same file in this thread).
   const deadline = Date.now() + 10_000;
   let confirmed = false;
   while (Date.now() < deadline) {
     await page.waitForTimeout(400);
+    if (await dismissDuplicateUploadModal(page)) {
+      // Modal means ChatGPT already has this file — treat as attached and continue.
+      confirmed = true;
+      break;
+    }
     const afterCount = await page.evaluate(() =>
       document.querySelectorAll('img[src^="blob:"]').length
     );
@@ -584,6 +655,9 @@ async function uploadReferenceImages(page, imagePaths) {
       break;
     }
   }
+
+  // One more pass in case the modal appeared after the blob preview.
+  await dismissDuplicateUploadModal(page);
 
   if (confirmed) {
     console.error("[image-gen] Reference images attached and previewing in composer.");
