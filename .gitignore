@@ -9,3 +9,5 @@ edge-profile/
 chatgpt-storage.json
 .generate.lock
 .DS_Store
+
+*.preview.png

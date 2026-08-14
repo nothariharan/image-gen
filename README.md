@@ -24,6 +24,7 @@ Built for **Cursor**, **Claude Code**, **Claude Desktop**, and any MCP client.
 - Reference-image uploads for variations / style matching
 - Auto-dismisses ChatGPT’s **“image was already uploaded”** / duplicate-file modal
 - Transparent-background prompt helper for icons and UI marks
+- **Transparency anti-hallucination** — alpha report + checkerboard `.preview.png` so agents don’t loop regenerating over ChatGPT’s soft bottom shadow
 - Thread-safe image detection (ignores older images already in the chat)
 - Parallel `generate_image` calls are **queued** (in-process + file lock)
 
@@ -312,6 +313,7 @@ npm start
 | Agent used built-in image tool instead | Say “use image-gen MCP / `generate_image`” or `/chatgpt-image-gen` in Cursor |
 | Reference images skipped | Paths must exist and be absolute from the MCP process |
 | Stuck on **image was already uploaded** | v2.4.1+ auto-dismisses `#modal-duplicate-file`; reload the MCP if you’re still on an older process |
+| Agent keeps saying **baked black background** | Soft bottom shadow ≠ solid fill. Read `TRANSPARENCY_REPORT` / `.preview.png`. Reload MCP to pick up v2.5+. Only regenerate if verdict is `OPAQUE_BAKED_BACKGROUND` |
 | Wrong chat thread | Close extra `chatgpt.com` tabs in the auth-profile window |
 
 ---

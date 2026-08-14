@@ -346,7 +346,9 @@ export async function ensureChatGptLoggedIn(page, { waitForManual = true } = {})
 
 async function generateImageUnlocked(prompt, outputPath, { transparent = false, referenceImages = [] } = {}) {
   const finalPrompt = transparent
-    ? `${prompt}, isolated subject, transparent background, no background, no shadow`
+    ? `${prompt}. Isolated cutout on a COMPLETELY TRANSPARENT background (alpha), ` +
+      `no solid black/white/colored plate, no backdrop box, no vignette fill. ` +
+      `A faint contact shadow on the subject is ok; do not fill the canvas behind it.`
     : prompt;
 
   const resolvedOutput = path.resolve(outputPath);
