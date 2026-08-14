@@ -341,8 +341,10 @@ npm start
 
 ```text
 image-gen/
-├── mcp-server.mjs       # MCP entry (stdio)
+├── mcp-server.mjs       # MCP entry (stdio) + transparency report response
 ├── generate.mjs         # CDP attach, login, generation, download
+├── transparency.mjs     # Alpha inspect + checkerboard .preview.png
+├── queue.mjs            # Serialize parallel generate_image calls
 ├── login-once.mjs       # One-time auth setup
 ├── setup-session.mjs    # Connection smoke test
 ├── launch-edge.bat      # Windows auth-profile launcher
