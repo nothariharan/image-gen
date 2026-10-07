@@ -1,8 +1,8 @@
 {
   "name": "image-gen-mcp",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "type": "module",
-  "description": "MCP image generation for AI agents via your ChatGPT browser session — no OpenAI API key. Dedicated auth profile, attach-first CDP, session backup, transparency anti-hallucination reports.",
+  "description": "MCP image generation for AI agents via your ChatGPT browser session — no OpenAI API key. Includes a /chatgpt-image-gen skill so the agent calls generate_image instead of a built-in image tool.",
   "main": "mcp-server.mjs",
   "bin": {
     "image-gen-mcp": "mcp-server.mjs"

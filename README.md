@@ -13,6 +13,8 @@ Most agent image tools need an OpenAI API key and burn credits. **image-gen** bo
 
 Built for **Cursor**, **Claude Code**, **Claude Desktop**, and any MCP client.
 
+The reliable way to use it is the bundled skill. Register the MCP, copy `skills/chatgpt-image-gen/` into your agent, then invoke `/chatgpt-image-gen` (or `@chatgpt-image-gen`) and describe the asset. The agent drives your ChatGPT session and saves a real PNG into the project. Setup is below.
+
 ---
 
 ## Features
@@ -89,15 +91,13 @@ Open `~/.cursor/mcp.json` (Windows: `%USERPROFILE%\.cursor\mcp.json`) and add:
   "mcpServers": {
     "image-gen": {
       "command": "node",
-      "args": ["C:/Users/YOU/playwright-image-gen/mcp-server.mjs"]
+      "args": ["C:/Users/YOU/image-gen/mcp-server.mjs"]
     }
   }
 }
 ```
 
 Reload Cursor (or toggle the MCP off/on). The tool appears as `generate_image` on server `image-gen` / `user-image-gen`.
-
-**Tip:** In chat, invoke explicitly with `/chatgpt-image-gen` or say “use the image-gen MCP” so the agent doesn’t use Cursor’s built-in image tool.
 
 #### Claude Code
 
@@ -109,11 +109,60 @@ claude mcp add -s user image-gen node /absolute/path/to/image-gen/mcp-server.mjs
 
 Edit your Claude Desktop MCP config and add the same `command` / `args` block as Cursor.
 
+### 5. Install the skill and invoke it
+
+Agents often **do not** pick this MCP on their own. They see an image request and call a built-in image tool instead. The skill is the switch: you invoke it, and the agent has to call `generate_image`.
+
+The skill ships in this repo:
+
+```text
+skills/chatgpt-image-gen/SKILL.md
+```
+
+Copy that folder into your agent's skills directory (once):
+
+**Cursor (Windows PowerShell)** — run this from the cloned repo:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.cursor\skills\chatgpt-image-gen" | Out-Null
+Copy-Item .\skills\chatgpt-image-gen\SKILL.md "$env:USERPROFILE\.cursor\skills\chatgpt-image-gen\SKILL.md"
+```
+
+**Claude Code (Windows PowerShell)** — same folder, under `.claude`:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills\chatgpt-image-gen" | Out-Null
+Copy-Item .\skills\chatgpt-image-gen\SKILL.md "$env:USERPROFILE\.claude\skills\chatgpt-image-gen\SKILL.md"
+```
+
+**Cursor and Claude Code (macOS / Linux)**:
+
+```bash
+mkdir -p ~/.cursor/skills/chatgpt-image-gen ~/.claude/skills/chatgpt-image-gen
+cp skills/chatgpt-image-gen/SKILL.md ~/.cursor/skills/chatgpt-image-gen/SKILL.md
+cp skills/chatgpt-image-gen/SKILL.md ~/.claude/skills/chatgpt-image-gen/SKILL.md
+```
+
+Start a **new chat**, then invoke the skill and describe the asset:
+
+```text
+/chatgpt-image-gen app icon, flat, dark blue, transparent background, save it in public/icons
+```
+
+`@chatgpt-image-gen` works the same if your client uses @ mentions. You can also attach the skill in the composer the way you attach any other skill.
+
+That is the whole loop after setup:
+
+1. You invoke the skill and say what you want.
+2. The agent calls `generate_image` on the image-gen MCP (never its built-in image tool).
+3. ChatGPT draws it in your logged-in browser.
+4. A PNG lands in `public/` or `assets/`, and the agent embeds that file.
+
 ---
 
 ## Everyday use
 
-Once login is done, your agent calls:
+Once login and the skill are in place, invoke `/chatgpt-image-gen` and your agent calls:
 
 ```text
 generate_image
@@ -226,7 +275,7 @@ Or in Cursor `mcp.json`:
   "mcpServers": {
     "image-gen": {
       "command": "node",
-      "args": ["C:/Users/YOU/playwright-image-gen/mcp-server.mjs"],
+      "args": ["C:/Users/YOU/image-gen/mcp-server.mjs"],
       "env": {
         "IMAGE_GEN_CHATGPT_EMAIL": "you@example.com"
       }
@@ -310,7 +359,7 @@ npm start
 | Stuck on **Welcome back** | MCP auto-clicks; set `IMAGE_GEN_CHATGPT_EMAIL` if the wrong account is listed |
 | `ChatGPT refused` | Content policy — rephrase the prompt |
 | Timed out after 3 minutes | Check rate limits / Plus status in ChatGPT manually |
-| Agent used built-in image tool instead | Say “use image-gen MCP / `generate_image`” or `/chatgpt-image-gen` in Cursor |
+| Agent used built-in image tool instead | Install `skills/chatgpt-image-gen` (step 5) and invoke `/chatgpt-image-gen` or `@chatgpt-image-gen` in a new chat |
 | Reference images skipped | Paths must exist and be absolute from the MCP process |
 | Stuck on **image was already uploaded** | v2.4.1+ auto-dismisses `#modal-duplicate-file`; reload the MCP if you’re still on an older process |
 | Agent keeps saying **baked black background** | Soft bottom shadow ≠ solid fill. Read `TRANSPARENCY_REPORT` / `.preview.png`. Reload MCP to pick up v2.5+. Only regenerate if verdict is `OPAQUE_BAKED_BACKGROUND` |
@@ -348,6 +397,9 @@ image-gen/
 ├── login-once.mjs       # One-time auth setup
 ├── setup-session.mjs    # Connection smoke test
 ├── launch-edge.bat      # Windows auth-profile launcher
+├── skills/
+│   └── chatgpt-image-gen/
+│       └── SKILL.md     # Invoke with /chatgpt-image-gen so the agent uses this MCP
 ├── edge-auth-profile/   # Created locally — gitignored
 ├── chatgpt-storage.json # Created locally — gitignored
 └── assets/
